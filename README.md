@@ -19,16 +19,16 @@
 ## 📂 Struktur Project
 
 ```bash
-react-fundamentals/
-├── backend/                # Backend server Express.js
+folder-project/
+├── backend/                       
 │   ├── src/
 │   │   └── server.ts
 │   ├── .env
 │   ├── package.json
 │   └── tsconfig.json
 │
-├── public/                 # Asset public React
-├── src/                    # Source code React
+├── public/                 
+├── src/                   
 │   ├── assets/
 │   └── components/
 └── package.json (frontend)
@@ -46,7 +46,7 @@ git clone https://github.com/username/nama-repo.git
 cd nama-repo
 ```
 <h2>b. Install Dependencies Backend</h2>
-<h3>Masuk ke Folder backend lalu install dependencies</h3>
+<h3>Masuk ke Folder backend lalu install dependencies.</h3>
 
 ```bash
 cd backend
