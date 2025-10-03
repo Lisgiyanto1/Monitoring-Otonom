@@ -7,26 +7,25 @@ jest.mock('mqtt', () => ({
   connect: jest.fn(() => ({
     on: jest.fn(),
     subscribe: jest.fn(),
-    end: jest.fn((force, callback) => {
-      if (callback) {
-        callback();
-      }
+    end: jest.fn((force: boolean, callback?: () => void) => {
+      if (callback) callback();
     }),
   })),
 }));
 
 describe('API Endpoints Tests', () => {
+  let runningServer: Server;
 
-  let runningServer: Server; 
-  beforeAll(() => {
-    const { server } = startServer();
+  beforeAll(async () => {
+    const { server } = await startServer(); // pastikan async
     runningServer = server;
   });
 
   afterAll(async () => {
-    await stopServer();
+    if (runningServer) {
+      await stopServer();
+    }
   });
-
 
   describe('GET /api/dummy', () => {
     it('should return the complete dummy location data with a 200 status code', async () => {
@@ -42,7 +41,7 @@ describe('API Endpoints Tests', () => {
       expect(response.statusCode).toBe(200);
       expect(response.body).toEqual({
         status: 'Initializing...',
-        hasData: false
+        hasData: false,
       });
     });
   });
@@ -52,7 +51,7 @@ describe('API Endpoints Tests', () => {
       const response = await request(runningServer).get('/api/latest-data');
       expect(response.statusCode).toBe(404);
       expect(response.body).toEqual({
-        message: 'No data has been received from the device yet.'
+        message: 'No device data available yet.',
       });
     });
   });
