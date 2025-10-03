@@ -1,13 +1,12 @@
-// File: backend/src/server.ts (Refactored for Testability)
 
 import cors from 'cors';
 import dotenv from 'dotenv';
 import express, { Express, Request, Response } from 'express';
 import { Server } from 'http';
-import mqtt, { MqttClient } from 'mqtt';
+import mqtt, { IClientOptions, MqttClient } from 'mqtt';
 import { DummyLokasi } from './dummy';
 
-// Tipe data yang dibutuhkan
+
 interface DeviceData {
   latitude: number;
   longitude: number;
@@ -15,75 +14,139 @@ interface DeviceData {
   speed: number;
 }
 
-// --- Deklarasi Variabel di Scope Modul ---
-// Variabel-variabel ini akan diinisialisasi oleh startServer()
-// dan dihentikan oleh stopServer().
+
 let app: Express;
 let server: Server;
 let client: MqttClient;
 let dummyDataInterval: NodeJS.Timeout;
 
 let latestDeviceData: DeviceData | null = null;
-let connectionStatus: string = 'Offline';
+let connectionStatus = 'Offline';
 
-// --- FUNGSI UTAMA: UNTUK MEMULAI SEMUA LAYANAN ---
-export function startServer(): { app: Express, server: Server } {
+
+function parseTTNPayload(payload: Buffer): DeviceData | null {
+  try {
+    const message = JSON.parse(payload.toString());
+    const decoded = message?.uplink_message?.decoded_payload;
+
+    if (!decoded) return null;
+
+    return {
+      latitude: decoded.latitude ?? decoded.lat ?? 0.0,
+      longitude: decoded.longitude ?? decoded.lon ?? decoded.long ?? 0.0,
+      battery: decoded.battery ?? 0,
+      speed: decoded.speed ?? 0,
+    };
+  } catch (err) {
+    console.error('Error parsing TTN message:', err);
+    return null;
+  }
+}
+
+
+function startDummyDataGenerator(interval = 5000): NodeJS.Timeout {
+  let featureIndex = 0;
+  let coordIndex = 0;
+
+  return setInterval(() => {
+    const features = DummyLokasi[0]?.features;
+    if (!features || features.length === 0) {
+      console.error("❌ DummyLokasi kosong / tidak valid.");
+      return;
+    }
+
+    if (featureIndex >= features.length) {
+      featureIndex = 0;
+      coordIndex = 0;
+    }
+
+    const feature = features[featureIndex];
+    if (!feature) return;
+
+    const { type, coordinates } = feature.geometry;
+
+    if (type === "Point") {
+      latestDeviceData = {
+        latitude: coordinates[1],
+        longitude: coordinates[0],
+        battery: Math.floor(Math.random() * 100),
+        speed: Math.floor(Math.random() * 100),
+      };
+      featureIndex++;
+      coordIndex = 0;
+    } else if (type === "LineString") {
+      if (coordIndex < coordinates.length) {
+        const [lon, lat] = coordinates[coordIndex];
+        latestDeviceData = {
+          latitude: lat,
+          longitude: lon,
+          battery: Math.floor(Math.random() * 100),
+          speed: Math.floor(Math.random() * 100),
+        };
+        coordIndex++;
+      } else {
+        featureIndex++;
+        coordIndex = 0;
+      }
+    }
+  }, interval);
+}
+
+
+export function startServer(): { app: Express; server: Server } {
   app = express();
-  // Gunakan port 0 untuk tes agar otomatis memilih port yang tersedia
-  // atau port dari .env untuk penggunaan normal.
-  const port = process.env.NODE_ENV === 'test' ? 0 : (process.env.API_PORT || 3001);
   app.use(cors());
 
-  // Inisialisasi State
+  const port =
+    process.env.NODE_ENV === 'test'
+      ? 0
+      : Number(process.env.API_PORT) || 3001;
+
+
   latestDeviceData = null;
   connectionStatus = 'Initializing...';
 
-  // --- Koneksi ke TTN MQTT Broker ---
-  const brokerUrl = `mqtt://${process.env.LORA_BROKER}:${process.env.LORA_PORT}`;
-  const options: mqtt.IClientOptions = {
+
+  const brokerUrl = `mqtt://${process.env.LORA_BROKER ?? 'localhost'}:${process.env.LORA_PORT ?? '1883'}`;
+  const options: IClientOptions = {
     username: process.env.LORA_USERNAME,
     password: process.env.LORA_PASSWORD,
     clientId: `backend_server_${Date.now()}`,
   };
-  
-  console.log(`Attempting to connect to TTN broker at ${brokerUrl}`);
+
+  console.log(`🔌 Connecting to TTN broker at ${brokerUrl}...`);
   client = mqtt.connect(brokerUrl, options);
 
-  // --- Event Handlers untuk Klien MQTT ---
   client.on('connect', () => {
-    connectionStatus = 'Connected to TTN :)';
+    connectionStatus = 'Connected to TTN ✅';
     console.log(connectionStatus);
-    client.subscribe(process.env.LORA_TOPIC!, (err) => {
-      if (err) {
-        console.error('Failed to subscribe:', err);
-        connectionStatus = 'Subscription Failed';
-      } else {
-        console.log(`Subscribed to topic: ${process.env.LORA_TOPIC}`);
-      }
-    });
-  });
 
-  client.on('message', (topic: string, payload: Buffer) => {
-    try {
-      const message = JSON.parse(payload.toString());
-      if (message.uplink_message?.decoded_payload) {
-        const decoded = message.uplink_message.decoded_payload;
-        console.log('Received decoded payload:', decoded);
-        latestDeviceData = {
-          latitude: decoded.latitude ?? decoded.lat ?? 0.0,
-          longitude: decoded.longitude ?? decoded.lon ?? decoded.long ?? 0.0,
-          battery: decoded.battery ?? 0,
-          speed: decoded.speed ?? 0,
-        };
-      }
-    } catch (error) {
-      console.error('Error parsing TTN message:', error);
+    const topic = process.env.LORA_TOPIC;
+    if (topic) {
+      client.subscribe(topic, (err) => {
+        if (err) {
+          console.error('❌ Subscription failed:', err);
+          connectionStatus = 'Subscription Failed';
+        } else {
+          console.log(`📡 Subscribed to topic: ${topic}`);
+        }
+      });
+    } else {
+      console.warn('⚠️ No LORA_TOPIC defined in .env');
     }
   });
 
-  client.on('error', (err: Error) => {
+  client.on('message', (_topic, payload) => {
+    const parsed = parseTTNPayload(payload);
+    if (parsed) {
+      latestDeviceData = parsed;
+      console.log('📥 Received TTN data:', parsed);
+    }
+  });
+
+  client.on('error', (err) => {
     connectionStatus = 'Connection Error';
-    console.error('MQTT Connection Error:', err);
+    console.error('❌ MQTT Error:', err);
   });
 
   client.on('close', () => {
@@ -91,109 +154,58 @@ export function startServer(): { app: Express, server: Server } {
     console.log(connectionStatus);
   });
 
-  // --- Logika Dummy Data (setInterval) ---
-  let currentFeatureIndex = 0;
-  let currentCoordinateIndex = 0;
-  dummyDataInterval = setInterval(() => {
-    if (!DummyLokasi[0]?.features || DummyLokasi[0].features.length === 0) {
-      console.error("Struktur DummyLokasi tidak valid atau kosong.");
-      return;
-    }
-    const features = DummyLokasi[0].features;
-    if (currentFeatureIndex >= features.length) {
-      currentFeatureIndex = 0;
-      currentCoordinateIndex = 0;
-    }
-    const currentFeature = features[currentFeatureIndex];
-    if (!currentFeature) {
-      currentFeatureIndex = 0;
-      return;
-    }
-    if (currentFeature.geometry.type === "Point") {
-      latestDeviceData = {
-        latitude: currentFeature.geometry.coordinates[1],
-        longitude: currentFeature.geometry.coordinates[0],
-        battery: Math.floor(Math.random() * 100),
-        speed: Math.floor(Math.random() * 100),
-      };
-      currentFeatureIndex++;
-      currentCoordinateIndex = 0;
-    } else if (currentFeature.geometry.type === "LineString") {
-      const lineCoords = currentFeature.geometry.coordinates;
-      if (currentCoordinateIndex < lineCoords.length) {
-        const currentPoint = lineCoords[currentCoordinateIndex];
-        latestDeviceData = {
-          latitude: currentPoint[1],
-          longitude: currentPoint[0],
-          battery: Math.floor(Math.random() * 100),
-          speed: Math.floor(Math.random() * 100),
-        };
-        currentCoordinateIndex++;
-      }
-      if (currentCoordinateIndex >= lineCoords.length) {
-        currentFeatureIndex++;
-        currentCoordinateIndex = 0;
-      }
-    }
-  }, 5000);
 
-  // --- API Endpoints ---
-  app.get('/api/dummy', (req: Request, res: Response) => {
+  dummyDataInterval = startDummyDataGenerator();
+
+
+  app.get('/api/dummy', (_req: Request, res: Response) => {
     res.json(DummyLokasi);
   });
-  app.get('/api/status', (req: Request, res: Response) => {
+
+  app.get('/api/status', (_req: Request, res: Response) => {
     res.json({
       status: connectionStatus,
-      hasData: latestDeviceData !== null
+      hasData: latestDeviceData !== null,
     });
   });
-  app.get('/api/latest-data', (req: Request, res: Response) => {
+
+  app.get('/api/latest-data', (_req: Request, res: Response) => {
     if (latestDeviceData) {
       res.json(latestDeviceData);
     } else {
-      res.status(404).json({ message: 'No data has been received from the device yet.' });
+      res.status(404).json({ message: 'No device data available yet.' });
     }
   });
 
-  // --- Menjalankan Server ---
+
   server = app.listen(port, () => {
     const address = server.address();
     const actualPort = typeof address === 'string' ? address : address?.port;
-    console.log(`|| Backend server is running on http://localhost:${actualPort} ||`);
+    console.log(`🚀 Backend running at http://localhost:${actualPort}`);
   });
 
   return { app, server };
 }
 
-// --- FUNGSI UTAMA: UNTUK MENGHENTIKAN SEMUA LAYANAN ---
+
 export function stopServer(): Promise<void> {
-  // Gunakan Promise untuk menangani operasi asinkron
   return new Promise((resolve, reject) => {
-    // Jika server tidak berjalan, langsung selesaikan
-    if (!server) {
-      return resolve();
-    }
-    
-    console.log("|| Stopping server and services... ||");
-    
-    // 1. Hentikan interval dummy data
+    if (!server) return resolve();
+
+    console.log("🛑 Stopping server & services...");
+
     clearInterval(dummyDataInterval);
 
-    // 2. Putuskan koneksi MQTT, jika ada
     if (client) {
-      // 'true' memaksa koneksi ditutup tanpa menunggu pesan offline.
-      client.end(true, () => {
-        console.log("|| MQTT client disconnected. ||");
-      }); 
+      client.end(true, () => console.log("🔌 MQTT disconnected."));
     }
 
-    // 3. Matikan server HTTP
     server.close((err) => {
       if (err) {
-        console.error("Error closing server:", err);
+        console.error("❌ Error closing server:", err);
         return reject(err);
       }
-      console.log("|| Server stopped. ||");
+      console.log("✅ Server stopped.");
       resolve();
     });
   });
