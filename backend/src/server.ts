@@ -177,6 +177,12 @@ app.get('/api/latest-data', (req: Request, res: Response) => {
 });
 
 // --- Menjalankan Server ---
-app.listen(port, () => {
-  console.log(`|| Backend server is running on http://localhost:${port} ||`);
-});
+// Cek jika file ini dijalankan langsung oleh Node, bukan diimpor oleh Jest
+if (process.env.NODE_ENV !== 'test') {
+  app.listen(port, () => {
+    console.log(`|| Backend server is running on http://localhost:${port} ||`);
+  });
+}
+
+// Ekspor app agar bisa digunakan oleh supertest di file tes kita
+export default app;
