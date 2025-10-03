@@ -1,0 +1,68 @@
+# File: .github/workflows/sonarqube-analysis.yml
+# Tujuan: Otomatis menjalankan analisis SonarQube setiap kali ada push ke branch main
+
+name: SonarQube Analysis
+
+on:
+  push:
+    branches:
+      - main # atau 'master', sesuaikan dengan nama branch utama Anda
+
+jobs:
+  analyze-frontend:
+    name: Analyze Frontend
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0  # Shallow clones should be disabled for a better relevancy of analysis
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18'
+
+      - name: Install Frontend Dependencies
+        run: npm install
+
+      - name: Run Frontend Tests & Coverage
+        run: npm test -- --coverage # Menjalankan skrip test dan menghasilkan folder coverage
+
+      - name: SonarQube Scan for Frontend
+        uses: SonarSource/sonarqube-scan-action@master
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
+        with:
+          projectBaseDir: . # Analisis dijalankan dari root (menggunakan sonar-project.properties di root)
+
+  analyze-backend:
+    name: Analyze Backend
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18'
+
+      - name: Install Backend Dependencies
+        run: npm install
+        working-directory: ./backend # Pindah ke direktori backend
+
+      - name: Run Backend Tests & Coverage
+        run: npm test -- --coverage
+        working-directory: ./backend
+
+      - name: SonarQube Scan for Backend
+        uses: SonarSource/sonarqube-scan-action@master
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
+        with:
+          projectBaseDir: ./backend # Analisis dijalankan dari folder backend
