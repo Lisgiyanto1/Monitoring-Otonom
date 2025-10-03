@@ -3,6 +3,7 @@ import { useEffect, useRef } from "react";
 import ReactDOM from "react-dom/client";
 
 import carMarker from "../assets/car.png";
+import { calculateBearing } from "../utils/geo"; // <-- Impor fungsi helper
 
 import CarTooltip from "./cartooltip";
 import type { DeviceData } from "./component-types/peta-mqtt-type";
@@ -18,18 +19,20 @@ export default function MarkerCar({ map, data, cityName }: MarkerCarProps) {
     const rootRef = useRef<ReactDOM.Root | null>(null);
     const popupNodeRef = useRef<HTMLDivElement | null>(null);
 
+    // Ref untuk menyimpan koordinat sebelumnya
+    const prevCoordsRef = useRef<[number, number] | null>(null);
+
     useEffect(() => {
+        // --- Inisialisasi marker (hanya sekali) ---
         if (!markerRef.current) {
-            // marker element (mobil)
             const el = document.createElement("div");
             el.className = "marker-car";
             el.style.backgroundImage = `url(${carMarker})`;
             el.style.width = "50px";
             el.style.height = "50px";
-            el.style.backgroundSize = "100%";
+            el.style.backgroundSize = "contain"; // 'contain' lebih baik dari '100%'
             el.style.backgroundRepeat = "no-repeat";
 
-            // popup container
             popupNodeRef.current = document.createElement("div");
             rootRef.current = ReactDOM.createRoot(popupNodeRef.current);
 
@@ -37,15 +40,22 @@ export default function MarkerCar({ map, data, cityName }: MarkerCarProps) {
                 popupNodeRef.current
             );
 
-            // buat marker + popup
-            markerRef.current = new mapboxgl.Marker(el)
+            // Buat marker dengan opsi rotasi
+            markerRef.current = new mapboxgl.Marker({
+                element: el,
+                // Opsi ini penting agar rotasi marker selaras dengan peta
+                rotationAlignment: 'map',
+                pitchAlignment: 'map'
+            })
                 .setLngLat([data.longitude, data.latitude])
                 .setPopup(popup)
                 .addTo(map);
+
+            // Simpan posisi awal sebagai posisi "sebelumnya"
+            prevCoordsRef.current = [data.longitude, data.latitude];
         }
 
         return () => {
-            // cleanup hanya saat component bener-bener unmount
             if (markerRef.current) {
                 markerRef.current.remove();
                 markerRef.current = null;
@@ -55,25 +65,46 @@ export default function MarkerCar({ map, data, cityName }: MarkerCarProps) {
                 rootRef.current = null;
             }
         };
-    }, [map]); 
+    }, [map]); // Dependency tetap [map] agar hanya jalan sekali
+
     useEffect(() => {
+        // --- Update posisi dan rotasi marker ---
         if (rootRef.current) {
             rootRef.current.render(<CarTooltip data={data} cityName={cityName} />);
         }
 
         if (markerRef.current) {
-            markerRef.current.setLngLat([data.longitude, data.latitude]);
+            const currentCoords: [number, number] = [data.longitude, data.latitude];
+            const prevCoords = prevCoordsRef.current;
+
+            let bearing = 0; // Default bearing jika tidak ada pergerakan
+
+            // Hitung bearing hanya jika ada posisi sebelumnya dan posisinya berubah
+            if (prevCoords && (prevCoords[0] !== currentCoords[0] || prevCoords[1] !== currentCoords[1])) {
+                bearing = calculateBearing(prevCoords, currentCoords);
+            } else {
+                // Jika tidak ada pergerakan, gunakan bearing map saat ini atau rotasi marker terakhir
+                bearing = markerRef.current.getRotation();
+            }
+
+            // Terapkan posisi dan rotasi baru ke marker
+            markerRef.current.setLngLat(currentCoords);
+            markerRef.current.setRotation(bearing);
+
+            // Perbarui ref dengan koordinat saat ini untuk iterasi berikutnya
+            prevCoordsRef.current = currentCoords;
+
+            // Animasikan peta untuk mengikuti mobil dengan bearing yang sesuai
+            map.flyTo({
+                center: currentCoords,
+                essential: true,
+                bearing: bearing, // <-- Gunakan bearing yang dihitung
+                pitch: 60,
+                zoom: 18, // Zoom mungkin lebih baik tidak terlalu dekat
+                speed: 1.5, // Atur kecepatan animasi
+            });
         }
-
-        map.flyTo({
-            center: [data.longitude, data.latitude],
-            essential: true,
-            bearing: 10,
-            pitch: 60,
-            zoom: 20,
-        });
-    }, [data, cityName, map]); // update tiap ada data/cityName berubah
-
+    }, [data, cityName, map]);
 
     return null;
 }

@@ -3,12 +3,13 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import express, { Request, Response } from 'express';
 import mqtt, { MqttClient } from 'mqtt';
+import { DummyLokasi } from './dummy';
 
 // Impor tipe data yang sama dengan frontend untuk konsistensi
 // (Anda bisa membuat shared library atau cukup copy-paste untuk proyek sederhana)
 interface DeviceData {
   latitude: number;
-  longitude: number;
+  longitude: number
   battery: number;
   speed: number;
 }
@@ -52,12 +53,12 @@ client.on('connect', () => {
 client.on('message', (topic: string, payload: Buffer) => {
   try {
     const message = JSON.parse(payload.toString());
-    
+
     // Ekstrak data dari struktur payload TTN V3 yang kompleks
     if (message.uplink_message?.decoded_payload) {
       const decoded = message.uplink_message.decoded_payload;
       console.log('Received decoded payload:', decoded);
-      
+
       // Simpan data yang sudah diproses ke state kita
       latestDeviceData = {
         latitude: decoded.latitude ?? decoded.lat ?? 0.0,
@@ -82,13 +83,87 @@ client.on('close', () => {
   console.log(connectionStatus);
 });
 
+
+let currentFeatureIndex = 0;
+let currentCoordinateIndex = 0;
+
+setInterval(() => {
+    if (!DummyLokasi[0]?.features || DummyLokasi[0].features.length === 0) {
+        console.error("Struktur DummyLokasi tidak valid atau kosong.");
+        return;
+    }
+
+    const features = DummyLokasi[0].features;
+
+    // ================== PERBAIKAN UTAMA DI SINI ==================
+    // 1. Cek dan reset indeks DI AWAL, SEBELUM digunakan.
+    if (currentFeatureIndex >= features.length) {
+        currentFeatureIndex = 0;
+        currentCoordinateIndex = 0;
+        console.log("--- Looping back to start ---");
+    }
+    // =============================================================
+
+    // 2. Sekarang, pengambilan 'currentFeature' dijamin aman.
+    const currentFeature = features[currentFeatureIndex];
+
+    // Sebagai pengaman tambahan (best practice)
+    if (!currentFeature) {
+        console.error(`Fitur tidak ditemukan di indeks ${currentFeatureIndex}. Me-reset.`);
+        currentFeatureIndex = 0;
+        return;
+    }
+    
+    // 3. Logika sisanya bisa berjalan dengan aman.
+    if (currentFeature.geometry.type === "Point") {
+        latestDeviceData = {
+            latitude: currentFeature.geometry.coordinates[1],
+            longitude: currentFeature.geometry.coordinates[0],
+            battery: Math.floor(Math.random() * 100),
+            speed: Math.floor(Math.random() * 100),
+        };
+
+        console.log(`Processing Point: ${JSON.stringify(currentFeature.properties)} at index ${currentFeatureIndex}`);
+        
+        currentFeatureIndex++;
+        currentCoordinateIndex = 0;
+
+    } else if (currentFeature.geometry.type === "LineString") {
+        const lineCoords = currentFeature.geometry.coordinates;
+
+        if (currentCoordinateIndex < lineCoords.length) {
+            const currentPoint = lineCoords[currentCoordinateIndex];
+            
+            latestDeviceData = {
+                latitude: currentPoint[1],
+                longitude: currentPoint[0],
+                battery: Math.floor(Math.random() * 100),
+                speed: Math.floor(Math.random() * 100),
+            };
+
+            console.log(`Processing LineString (Feature ${currentFeatureIndex}, Coordinate ${currentCoordinateIndex})`);
+            currentCoordinateIndex++;
+        }
+        
+        if (currentCoordinateIndex >= lineCoords.length) {
+            currentFeatureIndex++;
+            currentCoordinateIndex = 0;
+        }
+    }
+    
+}, 5000);
+
 // --- API Endpoints ---
+//endpoint untuk data dummy
+app.get('/api/dummy', (req: Request, res: Response) => {
+  res.json(DummyLokasi);
+})
 
 // Endpoint untuk frontend memeriksa status koneksi backend ke TTN
 app.get('/api/status', (req: Request, res: Response) => {
-  res.json({ 
+  res.json({
     status: connectionStatus,
-    hasData: latestDeviceData !== null 
+    hasData: latestDeviceData !== null
   });
 });
 

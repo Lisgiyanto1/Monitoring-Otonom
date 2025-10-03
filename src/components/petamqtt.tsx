@@ -39,7 +39,15 @@ function PetaMqtt() {
                 const response = await axios.get<DeviceData>(
                     `${apiBaseUrl}/api/latest-data`
                 );
-                setDeviceData(response.data);
+                const responseDummy =  await axios.get<DeviceData>(
+                    `${apiBaseUrl}/api/dummy`
+                )
+                if (response.data){
+                    setDeviceData(response.data);
+                }else if (responseDummy.data){
+                    setDeviceData(responseDummy.data);
+                }
+
                 setStatus("Connected");
             } catch (error) {
                 console.error("Error fetching device data:", error);
@@ -127,7 +135,7 @@ function PetaMqtt() {
                 <h1 className="text-lg font-bold text-gray-800 flex flex-row justify-center items-center  gap-2">
                     Dashboard Realtime Tracking{" "}
                     <b className="text-lg font-semibold text-blue-600">| MEVI</b>
-                    <img src={Logo} className="w-10 h-10"/>
+                    <img src={Logo} className="w-10 h-10" />
                 </h1>
             </div>
 
@@ -146,11 +154,10 @@ function PetaMqtt() {
             {/* STATUS */}
             <div className="absolute bottom-5 right-5 bg-white px-6 py-3 rounded-full shadow-xl z-10 flex items-center">
                 <span
-                    className={`h-3 w-3 rounded-full mr-2 ${
-                        status === "Connected"
-                            ? "bg-green-500 animate-pulse"
-                            : "bg-red-500"
-                    }`}
+                    className={`h-3 w-3 rounded-full mr-2 ${status === "Connected"
+                        ? "bg-green-500 animate-pulse"
+                        : "bg-red-500"
+                        }`}
                 ></span>
                 <span className="font-semibold text-gray-700">{status}</span>
             </div>
