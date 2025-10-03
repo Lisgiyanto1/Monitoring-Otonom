@@ -27,7 +27,8 @@ jobs:
         run: npm install
 
       - name: Run Frontend Tests & Coverage
-        run: npm test -- --coverage # Menjalankan skrip test dan menghasilkan folder coverage
+        # run: npm test -- --coverage # Menjalankan skrip test dan menghasilkan folder coverage
+        run: npm run test:ci -- --coverage
 
       - name: SonarQube Scan for Frontend
         uses: SonarSource/sonarqube-scan-action@master
