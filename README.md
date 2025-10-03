@@ -45,7 +45,7 @@ folder-project/
 git clone https://github.com/username/nama-repo.git
 cd nama-repo
 ```
-<h2>b. Install Dependencies Backend.</h2>
+<h2>b. Install Dependencies Backend</h2>
 <h3>Masuk ke Folder backend lalu install dependencies.</h3>
 
 ```bash
