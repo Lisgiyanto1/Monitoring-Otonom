@@ -1,16 +1,16 @@
 export default {
-  preset: 'ts-jest',
-  testEnvironment: 'jsdom',
-  setupFilesAfterEnv: ['<rootDir>/jest-setup.ts'],
-
-  testPathIgnorePatterns: ['<rootDir>/backend/'],
-
-  moduleNameMapper: {
-    '\\.(css|less|scss|sass)$': 'identity-obj-proxy',
-  },
+  testEnvironment: "jsdom",
   transform: {
-    '^.+\\.tsx?$': ['ts-jest', {
-      tsconfig: 'tsconfig.json',
-    }],
+    "^.+\\.(ts|tsx)$": "babel-jest"
   },
+  moduleFileExtensions: ["ts", "tsx", "js", "jsx", "json"],
+  testPathIgnorePatterns: ['<rootDir>/backend/'],
+  testMatch: [
+    '<rootDir>/src/**/*.test.ts',
+    '<rootDir>/src/**/*.test.tsx'
+  ],
+  setupFilesAfterEnv: ["<rootDir>/jest.setup.ts"],
+  moduleNameMapper: {
+    "\\.(css|less|scss|sass)$": "identity-obj-proxy"
+  }
 };

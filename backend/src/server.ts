@@ -1,188 +1,205 @@
-// File: backend/src/server.ts
+// File: backend/src/server.ts (Refactored for Testability)
+
 import cors from 'cors';
 import dotenv from 'dotenv';
-import express, { Request, Response } from 'express';
+import express, { Express, Request, Response } from 'express';
+import { Server } from 'http';
 import mqtt, { MqttClient } from 'mqtt';
 import { DummyLokasi } from './dummy';
 
-// Impor tipe data yang sama dengan frontend untuk konsistensi
-// (Anda bisa membuat shared library atau cukup copy-paste untuk proyek sederhana)
+// Tipe data yang dibutuhkan
 interface DeviceData {
   latitude: number;
-  longitude: number
+  longitude: number;
   battery: number;
   speed: number;
 }
 
-// --- Setup Awal ---
-dotenv.config(); // Memuat variabel dari file .env
-const app = express();
-const port = process.env.API_PORT || 3001;
-app.use(cors()); // Mengizinkan permintaan dari domain lain (frontend Anda)
+// --- Deklarasi Variabel di Scope Modul ---
+// Variabel-variabel ini akan diinisialisasi oleh startServer()
+// dan dihentikan oleh stopServer().
+let app: Express;
+let server: Server;
+let client: MqttClient;
+let dummyDataInterval: NodeJS.Timeout;
 
-// --- State Management Sederhana ---
-// Di aplikasi produksi, ini akan menjadi database (e.g., Redis, PostgreSQL).
 let latestDeviceData: DeviceData | null = null;
-let connectionStatus: string = 'Initializing...';
+let connectionStatus: string = 'Offline';
 
-// --- Koneksi ke TTN MQTT Broker ---
-const brokerUrl = `mqtt://${process.env.LORA_BROKER}:${process.env.LORA_PORT}`;
-const options: mqtt.IClientOptions = {
-  username: process.env.LORA_USERNAME,
-  password: process.env.LORA_PASSWORD,
-  clientId: `backend_server_${Date.now()}`,
-};
+// --- FUNGSI UTAMA: UNTUK MEMULAI SEMUA LAYANAN ---
+export function startServer(): { app: Express, server: Server } {
+  app = express();
+  // Gunakan port 0 untuk tes agar otomatis memilih port yang tersedia
+  // atau port dari .env untuk penggunaan normal.
+  const port = process.env.NODE_ENV === 'test' ? 0 : (process.env.API_PORT || 3001);
+  app.use(cors());
 
-console.log(`Attempting to connect to TTN broker at ${brokerUrl}`);
-const client: MqttClient = mqtt.connect(brokerUrl, options);
+  // Inisialisasi State
+  latestDeviceData = null;
+  connectionStatus = 'Initializing...';
 
-// --- Event Handlers untuk Klien MQTT ---
-client.on('connect', () => {
-  connectionStatus = 'Connected to TTN :)';
-  console.log(connectionStatus);
-  client.subscribe(process.env.LORA_TOPIC!, (err) => { // Tanda '!' berarti kita yakin variabel ini ada
-    if (err) {
-      console.error('Failed to subscribe:', err);
-      connectionStatus = 'Subscription Failed';
-    } else {
-      console.log(`Subscribed to topic: ${process.env.LORA_TOPIC}`);
+  // --- Koneksi ke TTN MQTT Broker ---
+  const brokerUrl = `mqtt://${process.env.LORA_BROKER}:${process.env.LORA_PORT}`;
+  const options: mqtt.IClientOptions = {
+    username: process.env.LORA_USERNAME,
+    password: process.env.LORA_PASSWORD,
+    clientId: `backend_server_${Date.now()}`,
+  };
+  
+  console.log(`Attempting to connect to TTN broker at ${brokerUrl}`);
+  client = mqtt.connect(brokerUrl, options);
+
+  // --- Event Handlers untuk Klien MQTT ---
+  client.on('connect', () => {
+    connectionStatus = 'Connected to TTN :)';
+    console.log(connectionStatus);
+    client.subscribe(process.env.LORA_TOPIC!, (err) => {
+      if (err) {
+        console.error('Failed to subscribe:', err);
+        connectionStatus = 'Subscription Failed';
+      } else {
+        console.log(`Subscribed to topic: ${process.env.LORA_TOPIC}`);
+      }
+    });
+  });
+
+  client.on('message', (topic: string, payload: Buffer) => {
+    try {
+      const message = JSON.parse(payload.toString());
+      if (message.uplink_message?.decoded_payload) {
+        const decoded = message.uplink_message.decoded_payload;
+        console.log('Received decoded payload:', decoded);
+        latestDeviceData = {
+          latitude: decoded.latitude ?? decoded.lat ?? 0.0,
+          longitude: decoded.longitude ?? decoded.lon ?? decoded.long ?? 0.0,
+          battery: decoded.battery ?? 0,
+          speed: decoded.speed ?? 0,
+        };
+      }
+    } catch (error) {
+      console.error('Error parsing TTN message:', error);
     }
   });
-});
 
-client.on('message', (topic: string, payload: Buffer) => {
-  try {
-    const message = JSON.parse(payload.toString());
+  client.on('error', (err: Error) => {
+    connectionStatus = 'Connection Error';
+    console.error('MQTT Connection Error:', err);
+  });
 
-    // Ekstrak data dari struktur payload TTN V3 yang kompleks
-    if (message.uplink_message?.decoded_payload) {
-      const decoded = message.uplink_message.decoded_payload;
-      console.log('Received decoded payload:', decoded);
+  client.on('close', () => {
+    connectionStatus = 'Disconnected from TTN';
+    console.log(connectionStatus);
+  });
 
-      // Simpan data yang sudah diproses ke state kita
-      latestDeviceData = {
-        latitude: decoded.latitude ?? decoded.lat ?? 0.0,
-        longitude: decoded.longitude ?? decoded.lon ?? decoded.long ?? 0.0,
-        battery: decoded.battery ?? 0,
-        speed: decoded.speed ?? 0,
-      };
-    }
-  } catch (error) {
-    console.error('Error parsing TTN message:', error);
-  }
-});
-
-client.on('error', (err: Error) => {
-  connectionStatus = 'Connection Error';
-  console.error('MQTT Connection Error:', err);
-  // Di aplikasi produksi, Anda mungkin ingin mencoba koneksi ulang di sini
-});
-
-client.on('close', () => {
-  connectionStatus = 'Disconnected from TTN';
-  console.log(connectionStatus);
-});
-
-
-let currentFeatureIndex = 0;
-let currentCoordinateIndex = 0;
-
-setInterval(() => {
+  // --- Logika Dummy Data (setInterval) ---
+  let currentFeatureIndex = 0;
+  let currentCoordinateIndex = 0;
+  dummyDataInterval = setInterval(() => {
     if (!DummyLokasi[0]?.features || DummyLokasi[0].features.length === 0) {
-        console.error("Struktur DummyLokasi tidak valid atau kosong.");
-        return;
+      console.error("Struktur DummyLokasi tidak valid atau kosong.");
+      return;
     }
-
     const features = DummyLokasi[0].features;
-
-    // ================== PERBAIKAN UTAMA DI SINI ==================
-    // 1. Cek dan reset indeks DI AWAL, SEBELUM digunakan.
     if (currentFeatureIndex >= features.length) {
-        currentFeatureIndex = 0;
-        currentCoordinateIndex = 0;
-        console.log("--- Looping back to start ---");
+      currentFeatureIndex = 0;
+      currentCoordinateIndex = 0;
     }
-    // =============================================================
-
-    // 2. Sekarang, pengambilan 'currentFeature' dijamin aman.
     const currentFeature = features[currentFeatureIndex];
-
-    // Sebagai pengaman tambahan (best practice)
     if (!currentFeature) {
-        console.error(`Fitur tidak ditemukan di indeks ${currentFeatureIndex}. Me-reset.`);
-        currentFeatureIndex = 0;
-        return;
+      currentFeatureIndex = 0;
+      return;
     }
-    
-    // 3. Logika sisanya bisa berjalan dengan aman.
     if (currentFeature.geometry.type === "Point") {
+      latestDeviceData = {
+        latitude: currentFeature.geometry.coordinates[1],
+        longitude: currentFeature.geometry.coordinates[0],
+        battery: Math.floor(Math.random() * 100),
+        speed: Math.floor(Math.random() * 100),
+      };
+      currentFeatureIndex++;
+      currentCoordinateIndex = 0;
+    } else if (currentFeature.geometry.type === "LineString") {
+      const lineCoords = currentFeature.geometry.coordinates;
+      if (currentCoordinateIndex < lineCoords.length) {
+        const currentPoint = lineCoords[currentCoordinateIndex];
         latestDeviceData = {
-            latitude: currentFeature.geometry.coordinates[1],
-            longitude: currentFeature.geometry.coordinates[0],
-            battery: Math.floor(Math.random() * 100),
-            speed: Math.floor(Math.random() * 100),
+          latitude: currentPoint[1],
+          longitude: currentPoint[0],
+          battery: Math.floor(Math.random() * 100),
+          speed: Math.floor(Math.random() * 100),
         };
-
-        console.log(`Processing Point: ${JSON.stringify(currentFeature.properties)} at index ${currentFeatureIndex}`);
-        
+        currentCoordinateIndex++;
+      }
+      if (currentCoordinateIndex >= lineCoords.length) {
         currentFeatureIndex++;
         currentCoordinateIndex = 0;
+      }
+    }
+  }, 5000);
 
-    } else if (currentFeature.geometry.type === "LineString") {
-        const lineCoords = currentFeature.geometry.coordinates;
+  // --- API Endpoints ---
+  app.get('/api/dummy', (req: Request, res: Response) => {
+    res.json(DummyLokasi);
+  });
+  app.get('/api/status', (req: Request, res: Response) => {
+    res.json({
+      status: connectionStatus,
+      hasData: latestDeviceData !== null
+    });
+  });
+  app.get('/api/latest-data', (req: Request, res: Response) => {
+    if (latestDeviceData) {
+      res.json(latestDeviceData);
+    } else {
+      res.status(404).json({ message: 'No data has been received from the device yet.' });
+    }
+  });
 
-        if (currentCoordinateIndex < lineCoords.length) {
-            const currentPoint = lineCoords[currentCoordinateIndex];
-            
-            latestDeviceData = {
-                latitude: currentPoint[1],
-                longitude: currentPoint[0],
-                battery: Math.floor(Math.random() * 100),
-                speed: Math.floor(Math.random() * 100),
-            };
+  // --- Menjalankan Server ---
+  server = app.listen(port, () => {
+    const address = server.address();
+    const actualPort = typeof address === 'string' ? address : address?.port;
+    console.log(`|| Backend server is running on http://localhost:${actualPort} ||`);
+  });
 
-            console.log(`Processing LineString (Feature ${currentFeatureIndex}, Coordinate ${currentCoordinateIndex})`);
-            currentCoordinateIndex++;
-        }
-        
-        if (currentCoordinateIndex >= lineCoords.length) {
-            currentFeatureIndex++;
-            currentCoordinateIndex = 0;
-        }
+  return { app, server };
+}
+
+// --- FUNGSI UTAMA: UNTUK MENGHENTIKAN SEMUA LAYANAN ---
+export function stopServer(): Promise<void> {
+  // Gunakan Promise untuk menangani operasi asinkron
+  return new Promise((resolve, reject) => {
+    // Jika server tidak berjalan, langsung selesaikan
+    if (!server) {
+      return resolve();
     }
     
-}, 5000);
+    console.log("|| Stopping server and services... ||");
+    
+    // 1. Hentikan interval dummy data
+    clearInterval(dummyDataInterval);
 
-// --- API Endpoints ---
-//endpoint untuk data dummy
-app.get('/api/dummy', (req: Request, res: Response) => {
-  res.json(DummyLokasi);
-})
+    // 2. Putuskan koneksi MQTT, jika ada
+    if (client) {
+      // 'true' memaksa koneksi ditutup tanpa menunggu pesan offline.
+      client.end(true, () => {
+        console.log("|| MQTT client disconnected. ||");
+      }); 
+    }
 
-// Endpoint untuk frontend memeriksa status koneksi backend ke TTN
-app.get('/api/status', (req: Request, res: Response) => {
-  res.json({
-    status: connectionStatus,
-    hasData: latestDeviceData !== null
-  });
-});
-
-// Endpoint utama untuk frontend mendapatkan data perangkat terbaru
-app.get('/api/latest-data', (req: Request, res: Response) => {
-  if (latestDeviceData) {
-    res.json(latestDeviceData);
-  } else {
-    res.status(404).json({ message: 'No data has been received from the device yet.' });
-  }
-});
-
-// --- Menjalankan Server ---
-// Cek jika file ini dijalankan langsung oleh Node, bukan diimpor oleh Jest
-if (process.env.NODE_ENV !== 'test') {
-  app.listen(port, () => {
-    console.log(`|| Backend server is running on http://localhost:${port} ||`);
+    // 3. Matikan server HTTP
+    server.close((err) => {
+      if (err) {
+        console.error("Error closing server:", err);
+        return reject(err);
+      }
+      console.log("|| Server stopped. ||");
+      resolve();
+    });
   });
 }
 
-// Ekspor app agar bisa digunakan oleh supertest di file tes kita
-export default app;
+if (require.main === module) {
+  dotenv.config();
+  startServer();
+}

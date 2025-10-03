@@ -9,7 +9,7 @@ import type { DeviceData } from "./component-types/peta-mqtt-type";
 
 mapboxgl.accessToken = import.meta.env.VITE_MAPBOXKEY || "";
 
-function PetaMqtt() {
+export default function PetaMqtt() {
     const apiBaseUrl = import.meta.env.VITE_API_BASE_URL;
 
     const [deviceData, setDeviceData] = useState<DeviceData | null>(null);
@@ -39,12 +39,12 @@ function PetaMqtt() {
                 const response = await axios.get<DeviceData>(
                     `${apiBaseUrl}/api/latest-data`
                 );
-                const responseDummy =  await axios.get<DeviceData>(
+                const responseDummy = await axios.get<DeviceData>(
                     `${apiBaseUrl}/api/dummy`
                 )
-                if (response.data){
+                if (response.data) {
                     setDeviceData(response.data);
-                }else if (responseDummy.data){
+                } else if (responseDummy.data) {
                     setDeviceData(responseDummy.data);
                 }
 
@@ -170,4 +170,3 @@ function PetaMqtt() {
     );
 }
 
-export default PetaMqtt;
