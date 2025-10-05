@@ -1,37 +1,23 @@
+# File: docker-compose.yml
+# Tujuan: Untuk menjalankan server SonarQube dan database pendukungnya.
+# Perintah: docker-compose up -d
+
 version: "3.8"
 
 services:
-  # =======================
-  # 1️⃣ SonarQube Service
-  # =======================
   sonarqube:
-    image: sonarqube:lts-community
+    image: sonarqube:lts-community # Menggunakan versi Long-Term Support yang stabil
     container_name: sonarqube
     ports:
-      - "9000:9000" # SonarQube dashboard
+      - "9000:9000" # Port untuk mengakses dashboard SonarQube
       - "9092:9092"
     environment:
-      - SONAR_ES_BOOTSTRAP_CHECKS_DISABLE=true
+      - SONAR_ES_BOOTSTRAP_CHECKS_DISABLE=true # Diperlukan untuk mode development
     volumes:
       - sonarqube_conf:/opt/sonarqube/conf
       - sonarqube_data:/opt/sonarqube/data
       - sonarqube_extensions:/opt/sonarqube/extensions
       - sonarqube_logs:/opt/sonarqube/logs
-    restart: always
-
-  # =======================
-  # 2️⃣ Cloudflare Tunnel
-  # =======================
-  cloudflared:
-    image: cloudflare/cloudflared:latest
-    container_name: cloudflare-tunnel
-    depends_on:
-      - sonarqube
-    command: tunnel --no-autoupdate run --token ${TUNNEL_TOKEN}
-    environment:
-      - TUNNEL_TOKEN=${TUNNEL_TOKEN}
-    restart: always
-    # Tidak perlu expose port, tunnel langsung ke internet
 
 volumes:
   sonarqube_conf:
