@@ -54,7 +54,7 @@ npm install
 ```
 
 <h2>b. Install Dependencies Frontend.</h2>
-<h3>Kembali ke root project lalu install dependensi frontend React</h3>
+<h3>Kembali ke root project lalu install dependensi frontend React.</h3>
 
 ```bash
 cd ..
