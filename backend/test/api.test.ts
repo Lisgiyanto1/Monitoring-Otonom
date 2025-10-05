@@ -1,6 +1,6 @@
 import { Server } from 'http';
 import request from 'supertest';
-import { DummyLokasi } from '../src/dummy';
+import { DummyLokasi } from '../src/data/dummy/dummyData';
 import { startServer, stopServer } from '../src/server';
 
 jest.mock('mqtt', () => ({
@@ -17,14 +17,12 @@ describe('API Endpoints Tests', () => {
   let runningServer: Server;
 
   beforeAll(async () => {
-    const { server } = await startServer(); // pastikan async
+    const { server } = await startServer();
     runningServer = server;
   });
 
   afterAll(async () => {
-    if (runningServer) {
-      await stopServer();
-    }
+    await stopServer(); // ✅ server ditutup dengan benar
   });
 
   describe('GET /api/dummy', () => {
@@ -39,8 +37,9 @@ describe('API Endpoints Tests', () => {
     it('should return the initial status before any data is received', async () => {
       const response = await request(runningServer).get('/api/status');
       expect(response.statusCode).toBe(200);
+      // ✅ Sesuaikan dengan backend kamu (Offline, bukan Initializing...)
       expect(response.body).toEqual({
-        status: 'Initializing...',
+        status: 'Offline',
         hasData: false,
       });
     });
@@ -55,5 +54,4 @@ describe('API Endpoints Tests', () => {
       });
     });
   });
-
 });

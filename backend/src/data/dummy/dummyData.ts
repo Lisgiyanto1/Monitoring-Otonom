@@ -1,28 +1,5 @@
-interface FeatureLineString {
-    type: "Feature";
-    properties: { [key: string]: number | string };
-    geometry: {
-        coordinates: number[][];
-        type: "LineString";
-    };
-}
+import { DummyDataLokasi } from "./dummy.data.types";
 
-interface FeaturePoint {
-    type: "Feature";
-    properties: { [key: string]: number | string };
-    geometry: {
-        coordinates: number[];
-        type: "Point";
-    };
-    id?: number;
-}
-
-interface DummyDataLokasi {
-    type: string;
-    features: (FeatureLineString | FeaturePoint)[];
-}
-
-// Dummy lokasi untuk testing tanpa mqtt
 export const DummyLokasi: DummyDataLokasi[] = [
     {
         "type": "FeatureCollection",
